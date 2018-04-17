@@ -56,48 +56,54 @@ static NRF_RESULT NRF_SetupGPIO(nrf24l01_dev* dev)
 
     NRF_CS_RESETPIN(dev);
     NRF_CE_RESETPIN(dev);
+    HAL_Delay(20);
 
     return NRF_OK;
 }
 
-NRF_RESULT NRF_Init(nrf24l01_dev* dev)
+uint32_t NRF_Init(nrf24l01_dev* dev)
 {
-
-    NRF_SetupGPIO(dev);
-  HAL_GPIO_TogglePin(GPIOA, GPIO_PIN_15);
-
-    NRF_PowerUp(dev, 1); 
-
     uint8_t config = 0;
+    uint8_t i=0;
+    uint32_t res=0;
+    if (NRF_SetupGPIO(dev) != NRF_OK) res+=1;
 
+    if (NRF_PowerUp(dev, 1) != NRF_OK) res+=1; 
+    //HAL_Delay(100);   //not helping
     while ((config & 2) == 0) { // wait for powerup
         NRF_ReadRegister(dev, NRF_CONFIG, &config);
     }
+/*Hostvind says:
+    It took long to discover that TX and RX_pipe0 addresses of PTx must be the 
+    same, if we count on receiving ACK packets. As well as targetted PRx pipe.
+    For example:
+    nrf1.TX = nrf1.RX0 = nrf2.RX0
+    and we don't care about nrf2.TX address
+    */  
+    if (NRF_SetRXPayloadWidth_P0(dev, dev->PayloadLength) != NRF_OK) res+=1;
+    if (NRF_SetRXAddress_P0(dev, dev->RX_ADDRESS) != NRF_OK) res+=1;
+    if (NRF_SetTXAddress(dev, dev->TX_ADDRESS) != NRF_OK) res+=1;
+    if (NRF_EnableRXDataReadyIRQ(dev, 1) != NRF_OK) res+=1;
+    if (NRF_EnableTXDataSentIRQ(dev, 1) != NRF_OK) res+=1;
+    if (NRF_EnableMaxRetransmitIRQ(dev, 1) != NRF_OK) res+=1;
+    if (NRF_EnableCRC(dev, 1) != NRF_OK) res+=1;
+    if (NRF_SetCRCWidth(dev, dev->CRC_WIDTH) != NRF_OK) res+=1;
+    if (NRF_SetAddressWidth(dev, dev->ADDR_WIDTH) != NRF_OK) res+=1;
+    if (NRF_SetRFChannel(dev, dev->RF_CHANNEL) != NRF_OK) res+=1;
+    if (NRF_SetDataRate(dev, dev->DATA_RATE) != NRF_OK) res+=1;
+    if (NRF_SetRetransmittionCount(dev, dev->RetransmitCount) != NRF_OK) res+=1;
+    if (NRF_SetRetransmittionDelay(dev, dev->RetransmitDelay) != NRF_OK) res+=1;
 
-    NRF_SetRXPayloadWidth_P0(dev, dev->PayloadLength);
-    NRF_SetRXAddress_P0(dev, dev->RX_ADDRESS);
-    NRF_SetTXAddress(dev, dev->TX_ADDRESS);
-    NRF_EnableRXDataReadyIRQ(dev, 1);
-    NRF_EnableTXDataSentIRQ(dev, 1);
-    NRF_EnableMaxRetransmitIRQ(dev, 1);
-    NRF_EnableCRC(dev, 1);
-    NRF_SetCRCWidth(dev, dev->CRC_WIDTH);
-    NRF_SetAddressWidth(dev, dev->ADDR_WIDTH);
-    NRF_SetRFChannel(dev, dev->RF_CHANNEL);
-    NRF_SetDataRate(dev, dev->DATA_RATE);
-    NRF_SetRetransmittionCount(dev, dev->RetransmitCount);
-    NRF_SetRetransmittionDelay(dev, dev->RetransmitDelay);
+    if (NRF_EnableRXPipe(dev, 0) != NRF_OK) res+=1;
+    if (NRF_EnableAutoAcknowledgement(dev, 1) != NRF_OK) res+=1;
 
-    NRF_EnableRXPipe(dev, 0);
-    NRF_EnableAutoAcknowledgement(dev, 0);
+    if (NRF_ClearInterrupts(dev) != NRF_OK) res+=1;
 
-    NRF_ClearInterrupts(dev);
+    if (NRF_RXTXControl(dev, NRF_STATE_RX) != NRF_OK) res+=1;
 
-    NRF_RXTXControl(dev, NRF_STATE_RX);
+    if (NRF_FlushRX(dev) != NRF_OK) res+=1;
 
-    NRF_FlushRX(dev);
-
-    return NRF_OK;
+    return res;
 }
 
 NRF_RESULT NRF_SendCommand(nrf24l01_dev* dev, uint8_t cmd, uint8_t* tx, uint8_t* rx,
@@ -135,7 +141,7 @@ HAL_StatusTypeDef res;
 void NRF_IRQ_Handler(nrf24l01_dev* dev)
 {
     uint8_t status = 0;
-    if (NRF_ReadRegister(dev, NRF_STATUS, &status) != NRF_OK) {
+    if (NRF_ReadRegister(dev, NRF_STATUS, &status) != NRF_OK) { 
         return;
     }
 
@@ -161,21 +167,26 @@ void NRF_IRQ_Handler(nrf24l01_dev* dev)
         NRF_CE_SETPIN(dev);
         NRF_WriteRegister(dev, NRF_STATUS, &status);
         dev->BUSY_FLAG = 0;
+/*DEBUG LINE*/  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_SET);
+        
     }
     if ((status & (1 << 4))) { // MaxRetransmits reached
         status |= 1 << 4;
 
         NRF_FlushTX(dev);
-        NRF_PowerUp(dev, 0); // power down
-        NRF_PowerUp(dev, 1); // power up
+        //this looks BAD BAD BAD
+        //NRF_PowerUp(dev, 0); // power down
+        //NRF_PowerUp(dev, 1); // power up
+/*DEBUG LINE*/  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET); 
 
         NRF_CE_RESETPIN(dev);
         NRF_RXTXControl(dev, NRF_STATE_RX);
         dev->STATE = NRF_STATE_RX;
         NRF_CE_SETPIN(dev);
-
+        
         NRF_WriteRegister(dev, NRF_STATUS, &status);
         dev->BUSY_FLAG = 0;
+/*DEBUG LINE*/  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET);
     }
 }
 
@@ -464,10 +475,10 @@ NRF_RESULT NRF_PowerUp(nrf24l01_dev* dev, uint8_t powerUp)
     } else {
         reg &= ~(1 << 1);
     }
-
     if (NRF_WriteRegister(dev, NRF_CONFIG, &reg) != NRF_OK) {
         return NRF_ERROR;
     }
+    HAL_Delay(10);
     return NRF_OK;
 }
 
@@ -486,6 +497,12 @@ NRF_RESULT NRF_RXTXControl(nrf24l01_dev* dev, NRF_TXRX_STATE rx)
 
     if (NRF_WriteRegister(dev, NRF_CONFIG, &reg) != NRF_OK) {
         return NRF_ERROR;
+    }
+    /*DELAY 135us?*/
+    if (rx)
+    {
+        NRF_CE_SETPIN(dev);
+        //HAL_Delay(1);
     }
     return NRF_OK;
 }
@@ -543,6 +560,17 @@ NRF_RESULT NRF_EnableMaxRetransmitIRQ(nrf24l01_dev* dev, uint8_t activate)
     return NRF_OK;
 }
 
+NRF_RESULT NRF_SetTXAddress(nrf24l01_dev* dev, uint8_t* address)
+{
+    uint8_t rx[5];
+    if (NRF_SendCommand(dev, NRF_CMD_W_REGISTER | NRF_TX_ADDR, address, rx, 5)
+        != NRF_OK) {
+        return NRF_ERROR;
+    }
+    dev->TX_ADDRESS = address;
+    return NRF_OK;
+}
+
 NRF_RESULT NRF_SetRXAddress_P0(nrf24l01_dev* dev, uint8_t* address)
 {
     uint8_t rx[5];
@@ -555,14 +583,19 @@ NRF_RESULT NRF_SetRXAddress_P0(nrf24l01_dev* dev, uint8_t* address)
     return NRF_OK;
 }
 
-NRF_RESULT NRF_SetTXAddress(nrf24l01_dev* dev, uint8_t* address)
+NRF_RESULT NRF_SetPipeAddress(nrf24l01_dev* dev, uint8_t* address, uint8_t pipe)
 {
+    if (pipe > 5)
+        return NRF_ERROR;
+    /*pipe 2-5 addresses must be ONE byte.
+    No fool-check here.
+    The first byte will be taken in case of 1<pipe<6*/
     uint8_t rx[5];
-    if (NRF_SendCommand(dev, NRF_CMD_W_REGISTER | NRF_TX_ADDR, address, rx, 5)
-        != NRF_OK) {
+    if (NRF_SendCommand(dev, NRF_CMD_W_REGISTER | (NRF_RX_ADDR_P0+pipe), address, rx, (pipe<2?5:1)) != NRF_OK)
+    {
         return NRF_ERROR;
     }
-    dev->TX_ADDRESS = address;
+//    if (pipe==0) dev->RX_ADDRESS = address;
     return NRF_OK;
 }
 
@@ -586,10 +619,11 @@ NRF_RESULT NRF_SendPacket(nrf24l01_dev* dev, uint8_t* data)
     NRF_RXTXControl(dev, NRF_STATE_TX);
     NRF_WriteTXPayload(dev, data);
     NRF_CE_SETPIN(dev);
-
+    //HAL_Delay(2);//Not helping
     while (dev->BUSY_FLAG == 1) {
         ;
     } // wait for end of transmittion
+    NRF_RXTXControl(dev, NRF_STATE_RX);
 
     return NRF_OK;
 }

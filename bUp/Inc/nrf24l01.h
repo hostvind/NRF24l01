@@ -84,7 +84,6 @@ typedef struct {
        RetransmitCount : can be 0~15 times
        RetransmitDelay : 0[250uS]~0x0F(4000us), LSB:250us
     */
-    uint8_t NRF_ACTIVE;
     NRF_DATA_RATE DATA_RATE;
     NRF_TX_PWR TX_POWER;
     NRF_CRC_WIDTH CRC_WIDTH;

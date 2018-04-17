@@ -30,3 +30,5 @@
 
 # Debug files
 *.dSYM/
+
+MDK-ARM/NRF24l01/
