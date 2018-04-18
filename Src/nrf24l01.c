@@ -1,4 +1,5 @@
 #include "nrf24l01.h"
+extern uint8_t IRQ_flags;
 
 static void NRF_CS_SETPIN(nrf24l01_dev* dev)
 {
@@ -147,19 +148,21 @@ void NRF_IRQ_Handler(nrf24l01_dev* dev)
 
     if ((status & (1 << 6))) { // RX FIFO Interrupt
         uint8_t fifo_status = 0;
-        NRF_CE_RESETPIN(dev);
+        //NRF_CE_RESETPIN(dev);
         NRF_WriteRegister(dev, NRF_STATUS, &status);
         NRF_ReadRegister(dev, NRF_FIFO_STATUS, &fifo_status);
-        if (dev->BUSY_FLAG == 1 && (fifo_status & 1) == 0) {
+        //if (dev->BUSY_FLAG == 1 && (fifo_status & 1) == 0) {
+            IRQ_flags |= 1 << 6;
             NRF_ReadRXPayload(dev, dev->RX_BUFFER);
             status |= 1 << 6;
             NRF_WriteRegister(dev, NRF_STATUS, &status);
             //NRF_FlushRX(dev);
-            dev->BUSY_FLAG = 0;
-        }
-        NRF_CE_SETPIN(dev);
+            //dev->BUSY_FLAG = 0;
+        //}
+        //NRF_CE_SETPIN(dev);
     }
     if ((status & (1 << 5))) { // TX Data Sent Interrupt
+            IRQ_flags |= 1 << 5;
         status |= 1 << 5; // clear the interrupt flag
         NRF_CE_RESETPIN(dev);
         NRF_RXTXControl(dev, NRF_STATE_RX);
@@ -172,6 +175,7 @@ void NRF_IRQ_Handler(nrf24l01_dev* dev)
     }
     if ((status & (1 << 4))) { // MaxRetransmits reached
         status |= 1 << 4;
+            IRQ_flags |= 1 << 4;
 
         NRF_FlushTX(dev);
         //this looks BAD BAD BAD
@@ -511,6 +515,7 @@ NRF_RESULT NRF_RXTXControl(nrf24l01_dev* dev, NRF_TXRX_STATE rx)
     if (rx)
     {
         NRF_CE_SETPIN(dev);
+        dev->STATE = NRF_STATE_RX;
         //HAL_Delay(1);
     }
     return NRF_OK;

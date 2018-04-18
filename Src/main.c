@@ -72,18 +72,17 @@ static void MX_USART1_UART_Init(void);
 /* FOR USE */
 #define PACKET_SIZE 5   //NRFx.payload_length
 nrf24l01_dev nrf1;
-nrf24l01_dev nrf2;
-uint8_t i;
+uint8_t i,reg;
 uint8_t push[32] = "heyoo";
 uint8_t pull[32] = "yoohe";
-uint8_t ADDR_1[5] = {'H','V','I','N','D'};
-uint8_t ADDR_2[5] = {'H','J','E','L','L'};
+uint8_t ADDR_1[5] = {'R','F','1','0','3'};  //TX, RX_P0
+uint8_t ADDR_2[5] = {'R','F','4','0','7'};  //PF_P1
 uint8_t PIPE_1[5] = {'P','I','P','E','1'};
 uint8_t uart_str[32] = "";
 /* FOR DEBUG */
 HAL_SPI_StateTypeDef spi_state;
 static NRF_RESULT res;
-volatile uint8_t IRQ1_counter, IRQ2_counter;
+volatile uint8_t IRQ1_counter, IRQ2_counter, IRQ_flags;
 /* USER CODE END 0 */
 
 /**
@@ -95,7 +94,6 @@ int main(void)
 {
   /* USER CODE BEGIN 1 */
     IRQ1_counter = 0;
-    IRQ2_counter = 0;
     nrf1.DATA_RATE = NRF_DATA_RATE_250KBPS;
     nrf1.TX_POWER = NRF_TX_PWR_0dBm;
     nrf1.CRC_WIDTH = NRF_CRC_WIDTH_1B;
@@ -117,28 +115,7 @@ int main(void)
     nrf1.NRF_CE_GPIO_PIN = GPIO_PIN_3;
     nrf1.NRF_IRQ_GPIOx = GPIOA;
     nrf1.NRF_IRQ_GPIO_PIN = GPIO_PIN_2;
-	
-	nrf2.DATA_RATE = NRF_DATA_RATE_250KBPS;
-    nrf2.TX_POWER = NRF_TX_PWR_0dBm;
-    nrf2.CRC_WIDTH = NRF_CRC_WIDTH_1B;
-    nrf2.ADDR_WIDTH = NRF_ADDR_WIDTH_5;
-    nrf2.PayloadLength = PACKET_SIZE; // maximum is 32 Bytes
-    nrf2.RetransmitCount = 10; // maximum is 15 times
-    nrf2.RetransmitDelay = 0x0F; // 4000us, LSB:250us
     
-    nrf2.RF_CHANNEL = 0;
-    nrf2.RX_ADDRESS = ADDR_1;   /*This is the target*/
-    nrf2.TX_ADDRESS = ADDR_2;   /*As long as we are in PRx mode, we don't care*/
-    
-    nrf2.NRF_IRQn = EXTI15_10_IRQn;
-    nrf2.spi=&hspi2;
-	
-    nrf2.NRF_CSN_GPIOx = GPIOB;
-    nrf2.NRF_CSN_GPIO_PIN = GPIO_PIN_12;
-    nrf2.NRF_CE_GPIOx = GPIOB;
-    nrf2.NRF_CE_GPIO_PIN = GPIO_PIN_11;
-    nrf2.NRF_IRQ_GPIOx = GPIOB;
-    nrf2.NRF_IRQ_GPIO_PIN = GPIO_PIN_10;	
   /* USER CODE END 1 */
 
   /* MCU Configuration----------------------------------------------------------*/
@@ -169,80 +146,9 @@ int main(void)
     
     sprintf(uart_str, "NRF1 SET returns=%d\n",NRF_Init(&nrf1));
     HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str), 100);  
-    
-	sprintf(uart_str, "NRF2 SET returns=%d\n",NRF_Init(&nrf2));
-    HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str), 100);
-// NRF_PowerUp(&nrf1, 0);
-// NRF_PowerUp(&nrf2, 0);
-// HAL_Delay(333);
-// NRF_PowerUp(&nrf1, 1);
-// NRF_PowerUp(&nrf2, 1);
-// HAL_Delay(333);
  /*HERE STARTS FUN*/
-    NRF_SendPacket(&nrf1,push);
+    //NRF_SendPacket(&nrf1,push);
 
- /*TRY PIPE1*/
-    if (NRF_SetPipeAddress(&nrf2, PIPE_1, 1) != NRF_OK)
-        sprintf(uart_str, "PIPE1 NOT SET\n");
-    else
-        sprintf(uart_str, "PIPE1 SET\n");
-    HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str), 100);    
-    
-    
-    NRF_ReadRegister(&nrf2, NRF_EN_AA, &i);
-    sprintf(uart_str, "NRF2 EN_AA=%x\n",i);
-    HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str), 100);    
-    
-    /*let's enable ALL pipes ^^*/
-    i=0x3F;
-    NRF_WriteRegister(&nrf2, NRF_EN_RXADDR, &i);
-    NRF_ReadRegister(&nrf2, NRF_EN_RXADDR, &i);
-    sprintf(uart_str, "NRF2 EN_RXADDR=%x\n",i);
-    HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str), 100);  
-    
-    //set NRF2_P1 payload width
-    NRF_WriteRegister(&nrf2, NRF_RX_PW_P1, &nrf2.PayloadLength);
-    /*NRF2 is PIPE1 set right?*/
-    sprintf(uart_str, "NRF2 PIPE1_ADDR=");
-    HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str), 100);
-    NRF_SendCommand(&nrf2, NRF_RX_ADDR_P1, uart_str+20, uart_str, 5);
-    uart_str[5]='\n';
-    HAL_UART_Transmit(&huart1, uart_str, 6, 100);  
-    
-            NRF_SetTXAddress    (&nrf1,PIPE_1);
-            NRF_SetRXAddress_P0 (&nrf1,PIPE_1);
-            NRF_SendPacket(&nrf1,pull);
-    
-   /*read regs*/ 
-    
-    sprintf(uart_str, "NRF1 TX_ADDR=");
-    HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str), 100);
-    NRF_SendCommand(&nrf1, NRF_TX_ADDR, uart_str+20, uart_str, 5);
-    uart_str[5]='\n';
-    HAL_UART_Transmit(&huart1, uart_str, 6, 100);  
-    
-    sprintf(uart_str, "NRF1 RX_ADDR=");
-    HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str), 100);
-    NRF_SendCommand(&nrf1, NRF_RX_ADDR_P0, uart_str+20, uart_str, 5);
-    uart_str[5]='\n';
-    HAL_UART_Transmit(&huart1, uart_str, 6, 100);  
-    
-     
-    NRF_ReadRegister(&nrf1, NRF_CONFIG, &i);
-    sprintf(uart_str, "NRF1 CONFIG=%x\n",i);
-    HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str), 100);  
-    NRF_ReadRegister(&nrf2, NRF_CONFIG, &i);
-    sprintf(uart_str, "NRF2 CONFIG=%x\n",i);
-    HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str), 100);  
-    NRF_ReadRegister(&nrf1, NRF_STATUS, &i);
-    sprintf(uart_str, "NRF1 STATUS=%x\n",i);
-    HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str), 100);  
-    NRF_ReadRegister(&nrf2, NRF_STATUS, &i);
-    sprintf(uart_str, "NRF2 STATUS=%x\n",i);
-    HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str), 100);  
-    NRF_ReadRegister(&nrf2, NRF_RX_PW_P1, &i);
-    sprintf(uart_str, "NRF2 RX_PW_P1=%x\n",i);
-    HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str), 100);  
   
   /* USER CODE END 2 */
 
@@ -250,29 +156,53 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-
   /* USER CODE END WHILE */
 
   /* USER CODE BEGIN 3 */
-    if (IRQ1_counter != 0)
-    {
-        /*Debug here if interrupt occurs*/
-        sprintf(uart_str, "NRF1 IRQ count: %d\n", IRQ1_counter);
-        HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str),100);
-        IRQ1_counter=0;
+      
+
+      /*NO FUN WITHOUT CHECK*/
+    NRF_ReadRegister(&nrf1, NRF_CONFIG, &reg);
+    if ( !(reg&0x80) && (reg & 2) )
+    {           /*==========FUN HERE==========*/        
+        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_SET);        //1
+            //NRF_SendPacket(&nrf1,push);
+        
+        
+        if (IRQ_flags&(1<<6))   // RX FIFO Interrupt
+        {
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET);    //2
+            HAL_Delay(100);
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET);    //2
+            HAL_Delay(100);
+        }
+        else 
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET); 
+        if (IRQ_flags&(1<<4))   // MaxRetransmits reached
+        {
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);    //3
+            HAL_Delay(100);
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);    //3
+            HAL_Delay(100);
+        }
+        else 
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);    //3
+        if (IRQ_flags&(1<<5))   // TX Data Sent Interrupt
+        {
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);    //4
+            HAL_Delay(100);
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);    //4
+            HAL_Delay(100);
+        }
+        else 
+            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET); 
+            
     }
-    if (IRQ2_counter != 0)
-    {        
-        /*Debug here if interrupt occurs*/
-        sprintf(uart_str, "NRF2 IRQ count: %d\n", IRQ2_counter);
-        HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str),100);
-        IRQ2_counter=0;
-/*DEBUG LINE*/  NRF_ReadRXPayload(&nrf2, pull);
-/*DEBUG LINE*/  HAL_UART_Transmit(&huart1, pull, strlen(pull),100);
-/*DEBUG LINE*/  HAL_UART_Transmit(&huart1, "\n", 1,100);
-    }
+    else
+        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_RESET);    
+    IRQ_flags=0;
     HAL_Delay(10);
-  }
+  }   
   /* USER CODE END 3 */
 
 }
