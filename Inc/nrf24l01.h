@@ -77,6 +77,12 @@ typedef enum {
     NRF_STATE_TX = 0
 } NRF_TXRX_STATE;
 
+typedef enum {
+    NRF_OK,
+    NRF_ERROR,
+    NRF_RX_BLOCKED, //after TX/RX enable state designed
+    NRF_TX_BLOCKED
+} NRF_RESULT;
 typedef struct {
 
     /* nrf24L01 Configuration Parameter 
@@ -136,10 +142,6 @@ typedef struct {
 
 } nrf24l01_dev;
 
-typedef enum {
-    NRF_OK,
-    NRF_ERROR
-} NRF_RESULT;
 
 /* Initialization routine */
 uint32_t NRF_Init(nrf24l01_dev* dev);

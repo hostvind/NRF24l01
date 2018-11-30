@@ -45,9 +45,38 @@
 
 /* USER CODE BEGIN Includes */
 
+#include "stm32f1xx_hal.h"
 /* USER CODE END Includes */
 
 /* Private define ------------------------------------------------------------*/
+
+#define CE1_Pin GPIO_PIN_1
+#define CE1_GPIO_Port GPIOA
+#define IRQ1_Pin GPIO_PIN_2
+#define IRQ1_GPIO_Port GPIOA
+#define IRQ1_EXTI_IRQn EXTI2_IRQn
+#define BUTTON_Pin GPIO_PIN_3
+#define BUTTON_GPIO_Port GPIOA
+#define CS1_Pin GPIO_PIN_4
+#define CS1_GPIO_Port GPIOA
+#define IRQ2_Pin GPIO_PIN_1
+#define IRQ2_GPIO_Port GPIOB
+#define CE2_Pin GPIO_PIN_11
+#define CE2_GPIO_Port GPIOB
+#define CS2_Pin GPIO_PIN_12
+#define CS2_GPIO_Port GPIOB
+#define LED1_Pin GPIO_PIN_15
+#define LED1_GPIO_Port GPIOA
+#define LED2_Pin GPIO_PIN_3
+#define LED2_GPIO_Port GPIOB
+#define LED3_Pin GPIO_PIN_4
+#define LED3_GPIO_Port GPIOB
+#define LED4_Pin GPIO_PIN_5
+#define LED4_GPIO_Port GPIOB
+#define No_TX_Pin GPIO_PIN_8
+#define No_TX_GPIO_Port GPIOB
+#define No_RX_Pin GPIO_PIN_9
+#define No_RX_GPIO_Port GPIOB
 
 /* ########################## Assert Selection ############################## */
 /**
@@ -57,7 +86,6 @@
 /* #define USE_FULL_ASSERT    1U */
 
 /* USER CODE BEGIN Private defines */
-
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

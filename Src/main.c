@@ -38,22 +38,27 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "stm32f1xx_hal.h"
-#include "stdlib.h"
-#include "string.h"
+
 /* USER CODE BEGIN Includes */
 #include "nrf24l01.h"
-
+#include "string.h"
+#include "Alerts.h"
 /* USER CODE END Includes */
 
 /* Private variables ---------------------------------------------------------*/
 SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi2;
 
+TIM_HandleTypeDef htim2;
+TIM_HandleTypeDef htim4;
+
 UART_HandleTypeDef huart1;
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
 
+volatile uint8_t uart_in[32];
+volatile char * uart_in_p = (char *) &uart_in;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -62,14 +67,27 @@ static void MX_GPIO_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_SPI2_Init(void);
 static void MX_USART1_UART_Init(void);
+static void MX_TIM2_Init(void);
+static void MX_TIM4_Init(void);
+
+void HAL_TIM_MspPostInit(TIM_HandleTypeDef *htim);
+                                
 
 /* USER CODE BEGIN PFP */
 /* Private function prototypes -----------------------------------------------*/
-
+void BUZZ (uint8_t time_x100ms);
+void BLINK (uint8_t time_x100ms, uint8_t led, MODE mode);
+uint8_t atoi8 (uint8_t* start);
+uint8_t Parse_Packet (uint8_t *in);
 /* USER CODE END PFP */
 
 /* USER CODE BEGIN 0 */
 /* FOR USE */
+LED_driver LD1, LD2, LD3, LD4;
+LED_driver* LED_p[4];
+BUZ_driver Buzzer;
+
+#define IS_DIGIT(x) (((x)>47) && ((x)<58))
 #define PACKET_SIZE 5   //NRFx.payload_length
 nrf24l01_dev nrf1;
 uint8_t i,reg;
@@ -79,9 +97,10 @@ uint8_t ADDR_1[5] = {'R','F','1','0','3'};  //TX, RX_P0
 uint8_t ADDR_2[5] = {'R','F','4','0','7'};  //PF_P1
 uint8_t PIPE_1[5] = {'P','I','P','E','1'};
 uint8_t uart_str[32] = "";
+char* uart_str_p = (char *)uart_str;
 /* FOR DEBUG */
 HAL_SPI_StateTypeDef spi_state;
-static NRF_RESULT res;
+//static NRF_RESULT res;
 volatile uint8_t IRQ1_counter, IRQ2_counter, IRQ_flags;
 /* USER CODE END 0 */
 
@@ -93,8 +112,20 @@ volatile uint8_t IRQ1_counter, IRQ2_counter, IRQ_flags;
 int main(void)
 {
   /* USER CODE BEGIN 1 */
+
+    LD1.LED_Port = GPIOA;   LD1.LED_Pin = GPIO_PIN_15;
+    LD2.LED_Port = GPIOB;   LD2.LED_Pin = GPIO_PIN_3;
+    LD3.LED_Port = GPIOB;   LD3.LED_Pin = GPIO_PIN_4;
+    LD4.LED_Port = GPIOB;   LD4.LED_Pin = GPIO_PIN_5;
+    LED_p[0]=&LD1; LED_p[1]=&LD2; LED_p[2]=&LD3; LED_p[3]=&LD4; 
+    
+    Buzzer.TIM_Handle = &htim2;
+    Buzzer.TIM_Channel = TIM_CHANNEL_1;
+    
+    
+    
     IRQ1_counter = 0;
-    nrf1.DATA_RATE = NRF_DATA_RATE_250KBPS;
+    nrf1.DATA_RATE = NRF_DATA_RATE_2MBPS;
     nrf1.TX_POWER = NRF_TX_PWR_0dBm;
     nrf1.CRC_WIDTH = NRF_CRC_WIDTH_1B;
     nrf1.ADDR_WIDTH = NRF_ADDR_WIDTH_5;
@@ -112,7 +143,7 @@ int main(void)
 	nrf1.NRF_CSN_GPIOx = GPIOA;
     nrf1.NRF_CSN_GPIO_PIN = GPIO_PIN_4;
     nrf1.NRF_CE_GPIOx = GPIOA;
-    nrf1.NRF_CE_GPIO_PIN = GPIO_PIN_3;
+    nrf1.NRF_CE_GPIO_PIN = GPIO_PIN_1;
     nrf1.NRF_IRQ_GPIOx = GPIOA;
     nrf1.NRF_IRQ_GPIO_PIN = GPIO_PIN_2;
     
@@ -122,6 +153,7 @@ int main(void)
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
   HAL_Init();
+
   /* USER CODE BEGIN Init */
 
   /* USER CODE END Init */
@@ -137,18 +169,28 @@ int main(void)
   MX_SPI1_Init();
   MX_SPI2_Init();
   MX_USART1_UART_Init();
-  /* USER CODE BEGIN 2 */ 
+  MX_TIM2_Init();
+  MX_TIM4_Init();
+  /* USER CODE BEGIN 2 */
 //HAL_Delay(2000);  
-  sprintf(uart_str, "\nAssimilation successful. %u\n",SystemCoreClock);
-  HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str), 100);
+    USART1->CR1 |= (1<<5); //RXNEIE = RX not empty interrupt enable;
+    HAL_TIM_OC_Start (&htim4, TIM_CHANNEL_1);   //enable buzz timer
+    HAL_TIM_OC_Start (&htim4, TIM_CHANNEL_2);   //enable blink timer
+    TIM4->DIER |= TIM_IT_CC2;                   //enable blink interrupt
+  sprintf(uart_str_p, "\nAssimilation successful. %u\n",SystemCoreClock);
+  HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str_p), 100);
 /*DEBUG LINE*/  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5, GPIO_PIN_RESET);
 /*DEBUG LINE*/  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_RESET);
     
-    sprintf(uart_str, "NRF1 SET returns=%d\n",NRF_Init(&nrf1));
-    HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str), 100);  
- /*HERE STARTS FUN*/
-    //NRF_SendPacket(&nrf1,push);
+    sprintf(uart_str_p, "NRF1 SET returns=%d\n",NRF_Init(&nrf1));
+    HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str_p), 100); 
 
+
+    
+ /*HERE STARTS FUN*/
+    NRF_SendPacket(&nrf1,push);
+    //BUZZ (1);   //REPORT FOR DUTY!
+    BLINK (5, 1, PERM);
   
   /* USER CODE END 2 */
 
@@ -163,45 +205,52 @@ int main(void)
 
       /*NO FUN WITHOUT CHECK*/
     NRF_ReadRegister(&nrf1, NRF_CONFIG, &reg);
+      
+//    if (!HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9))
+//        NRF_EnableRXDataReadyIRQ(&nrf1, 0);
+//    else NRF_EnableRXDataReadyIRQ(&nrf1, 1); //NRF_EnableTXDataSentIRQ
+      //BAD IDEA - CONSTANT REG ABUSE
+    
     if ( !(reg&0x80) && (reg & 2) )
-    {           /*==========FUN HERE==========*/        
-        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_SET);        //1
-            //NRF_SendPacket(&nrf1,push);
+    {           /*==========FUN HERE==========*/ 
         
-        
-        if (IRQ_flags&(1<<6))   // RX FIFO Interrupt
+        if ((IRQ_flags&(1<<6))&&(HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_9)))   // RX FIFO Interrupt
         {
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET);    //2
-            HAL_Delay(100);
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET);    //2
-            HAL_Delay(100);
+            //sprintf(uart_str_p, "\nSPAWN MORE OVERLORDS!!!\n");
+            IRQ_flags &= ~(1<<6);    //drop flag
+            sprintf(uart_str_p, "%s\n",nrf1.RX_BUFFER);
+            HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str_p), 100);
+            BLINK(2, 2, ONCE);      //report outside
         }
-        else 
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_RESET); 
-        if (IRQ_flags&(1<<4))   // MaxRetransmits reached
-        {
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_SET);    //3
-            HAL_Delay(100);
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);    //3
-            HAL_Delay(100);
-        }
-        else 
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_4, GPIO_PIN_RESET);    //3
         if (IRQ_flags&(1<<5))   // TX Data Sent Interrupt
         {
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_SET);    //4
-            HAL_Delay(100);
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET);    //4
-            HAL_Delay(100);
+            IRQ_flags &= ~(1<<5);    //drop flag
+            BLINK(2, 3, ONCE);      //report outside
         }
-        else 
-            HAL_GPIO_WritePin(GPIOB, GPIO_PIN_5, GPIO_PIN_RESET); 
+        if (IRQ_flags&(1<<4))   // MaxRetransmits reached
+        {
+            IRQ_flags &= ~(1<<4);    //drop flag
+            BLINK(2, 4, ONCE);      //report outside
+        }
+            if (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_8))
+                NRF_SendPacket(&nrf1,push);
             
     }
     else
-        HAL_GPIO_WritePin(GPIOA, GPIO_PIN_15, GPIO_PIN_RESET);    
-    IRQ_flags=0;
-    HAL_Delay(10);
+        ;
+//    IRQ_flags=0;
+    if (uart_in[0] != 0)
+    {
+    Parse_Packet(uart_in);
+        for (i=0;i<32;i++)
+        {
+            if (uart_in[i] == 0x0A || uart_in[i] == 0x0D)
+                break;
+            else
+                uart_in[i]=0;
+        } 
+    }       
+    HAL_Delay(500);             //REWRITE THIS SHIT ON TIM4_CH3
   }   
   /* USER CODE END 3 */
 
@@ -302,6 +351,95 @@ static void MX_SPI2_Init(void)
 
 }
 
+/* TIM2 init function */
+static void MX_TIM2_Init(void)
+{
+
+  TIM_MasterConfigTypeDef sMasterConfig;
+  TIM_OC_InitTypeDef sConfigOC;
+
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 18181;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 9091;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+  HAL_TIM_MspPostInit(&htim2);
+
+}
+
+/* TIM4 init function */
+static void MX_TIM4_Init(void)
+{
+
+  TIM_MasterConfigTypeDef sMasterConfig;
+  TIM_OC_InitTypeDef sConfigOC;
+
+  htim4.Instance = TIM4;
+  htim4.Init.Prescaler = 15;
+  htim4.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim4.Init.Period = 49999;
+  htim4.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim4.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_ENABLE;
+  if (HAL_TIM_OC_Init(&htim4) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim4, &sMasterConfig) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+  sConfigOC.OCMode = TIM_OCMODE_TIMING;
+  sConfigOC.Pulse = 49999;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_OC_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+  if (HAL_TIM_OC_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+  if (HAL_TIM_OC_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+  if (HAL_TIM_OC_ConfigChannel(&htim4, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
+  {
+    _Error_Handler(__FILE__, __LINE__);
+  }
+
+}
+
 /* USART1 init function */
 static void MX_USART1_UART_Init(void)
 {
@@ -334,52 +472,202 @@ static void MX_GPIO_Init(void)
   GPIO_InitTypeDef GPIO_InitStruct;
 
   /* GPIO Ports Clock Enable */
-  __HAL_RCC_GPIOC_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOA, GPIO_PIN_3|GPIO_PIN_15, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOA, CE1_Pin|BUTTON_Pin|CS1_Pin|LED1_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_11|GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_5, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, CE2_Pin|CS2_Pin|LED2_Pin|LED3_Pin 
+                          |LED4_Pin, GPIO_PIN_RESET);
 
-  /*Configure GPIO pin : PA2 */
-  GPIO_InitStruct.Pin = GPIO_PIN_2;
-  GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
-  GPIO_InitStruct.Pull = GPIO_PULLUP;
-  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
-
-  /*Configure GPIO pins : PA3 PA15 */
-  GPIO_InitStruct.Pin = GPIO_PIN_3|GPIO_PIN_15;
+  /*Configure GPIO pins : CE1_Pin BUTTON_Pin CS1_Pin LED1_Pin */
+  GPIO_InitStruct.Pin = CE1_Pin|BUTTON_Pin|CS1_Pin|LED1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : PB10 */
-  GPIO_InitStruct.Pin = GPIO_PIN_10;
+  /*Configure GPIO pin : IRQ1_Pin */
+  GPIO_InitStruct.Pin = IRQ1_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_IT_FALLING;
   GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(IRQ1_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : IRQ2_Pin */
+  GPIO_InitStruct.Pin = IRQ2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
+  HAL_GPIO_Init(IRQ2_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : CE2_Pin CS2_Pin LED2_Pin LED3_Pin 
+                           LED4_Pin */
+  GPIO_InitStruct.Pin = CE2_Pin|CS2_Pin|LED2_Pin|LED3_Pin 
+                          |LED4_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB11 PB3 PB4 PB5 */
-  GPIO_InitStruct.Pin = GPIO_PIN_11|GPIO_PIN_3|GPIO_PIN_4|GPIO_PIN_5;
-  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
-  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_MEDIUM;
+  /*Configure GPIO pins : No_TX_Pin No_RX_Pin */
+  GPIO_InitStruct.Pin = No_TX_Pin|No_RX_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
   /* EXTI interrupt init*/
   HAL_NVIC_SetPriority(EXTI2_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(EXTI2_IRQn);
 
-  HAL_NVIC_SetPriority(EXTI15_10_IRQn, 0, 0);
-  HAL_NVIC_EnableIRQ(EXTI15_10_IRQn);
-
 }
 
 /* USER CODE BEGIN 4 */
+void BUZZ (uint8_t time_x100ms)
+    {
+        if (time_x100ms < 101)
+        {
+            Buzzer.timer = time_x100ms+1;  //due to pre-decrement in ISR it stops on reaching 1
+            Buzzer.State = START;
+            TIM4->DIER |= TIM_IT_CC1;
+        }
+        else return;
+        return;
+    }
+    
+    /*Send time=0 to stop*/
+void BLINK (uint8_t time_x100ms, uint8_t led, MODE mode)
+    {
+        switch (led)
+        {
+            case 1: 
+                {
+                LD1.timer = time_x100ms;
+                LD1.Mode  = mode;
+                if (!time_x100ms)
+                    LD1.State = STOP;
+                else    
+                LD1.State = START;
+                break;
+                };
+            case 2: 
+                {
+                LD2.timer = time_x100ms;
+                LD2.Mode  = mode;
+                if (!time_x100ms)
+                    LD2.State = STOP;
+                else  
+                LD2.State = START;
+                break;
+                }
+            case 3: 
+                {
+                LD3.timer = time_x100ms;
+                LD3.Mode  = mode;
+                if (!time_x100ms)
+                    LD3.State = STOP;
+                else  
+                LD3.State = START;
+                break;
+                }
+            case 4: 
+                {
+                LD4.timer = time_x100ms;
+                LD4.Mode  = mode;
+                if (!time_x100ms)
+                    LD4.State = STOP;
+                else  
+                LD4.State = START;
+                break;
+                }
+            default:
+            {
+                return;
+            }
+        }
+        return;
+    }
 
+uint8_t Parse_Packet (uint8_t *in)
+{
+	
+	uint8_t *p;
+	uint8_t temp;
+	uint8_t led;
+    if (!strncmp ((char *)in,"BUZZ",4))
+    {
+        if (in[4]=='\f' || in[4]=='\n')
+            BUZZ(2);
+        if (in[4]==' ')
+            BUZZ(atoi8(&in[5]));
+        return 0;
+    }
+    if (!strncmp ((char *)in,"BLINK",5))
+    {
+        if (in[5]=='\f' || in[5]=='\n')
+            BLINK(3,4,ONCE);
+        if (in[5]==' ')
+        {
+            //parse input values
+            p = &in[6];
+            temp=atoi8(p); //GET TIME
+            led=0;        //GET LED
+            while (IS_DIGIT(*p)) p++;
+            p++;
+            led = (*p) - 48;
+            if (!( (led>0) && (led<5) ))    //wrong LED selected - do nothing
+                return 2;
+            p+=2;
+            if (!strncmp ((char *)p,"PERM",4))
+                BLINK (temp, led, PERM);
+            else BLINK (temp,led, ONCE);     //default must be "ONCE"
+        }
+        return 0;
+    }
+    
+    //NRF ReadReg
+    if (!strncmp ((char *)in,"NRF_REG",7))
+    {
+        temp = atoi8 (&in[8]);
+        NRF_ReadRegister(&nrf1, temp, &reg);
+        sprintf(uart_str_p, "NRF_REG=0x%x\n",reg);
+        HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str_p), 100);
+        return 0;
+    }
+    if (!strncmp ((char *)in,"CONFIG",6))
+    {
+        NRF_ReadRegister(&nrf1, NRF_CONFIG, &reg);
+        sprintf(uart_str_p, "CONFIG=0x%x\n",reg);
+        HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str_p), 100);
+        return 0;
+    }
+    if (!strncmp ((char *)in,"RF_SETUP",8))
+    {
+        NRF_ReadRegister(&nrf1, NRF_RF_SETUP, &reg);
+        sprintf(uart_str_p, "RF_SETUP=0x%x\n",reg);
+        HAL_UART_Transmit(&huart1, uart_str, strlen(uart_str_p), 100);
+        return 0;
+    }
+    else return 1;                      //command not recognized
+}
+
+uint8_t atoi8 (uint8_t* start)
+{
+    uint8_t     i=0;
+    uint16_t    res=0;  //for not to crop on "res*=10"
+    for (i=0;i<32;i++)  //for if there's no digits at all don't run away too far
+        while (!IS_DIGIT(*start))
+            start++;
+    for (i=0;i<3;i++)   //since it's 0..255 read no more than 3 chars
+        {
+            if (IS_DIGIT(start[i]))
+            {
+                res+=start[i]-48;
+                res*=10;
+            }
+            else break;
+        }
+        return (uint8_t) (res/10);
+}
 /* USER CODE END 4 */
 
 /**

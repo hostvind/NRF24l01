@@ -37,11 +37,29 @@
 
 /* USER CODE BEGIN 0 */
 #include "nrf24l01.h"
-extern uint8_t IRQ1_counter, IRQ2_counter;
+#include "Alerts.h"
+
+//alert structs
+
+extern LED_driver LD1, LD2, LD3, LD4;
+extern LED_driver* LED_p[4];
+extern BUZ_driver Buzzer;
+
+//handlers
 extern nrf24l01_dev nrf1;
+extern TIM_HandleTypeDef htim2;
+
+//debug purposed counters
+extern uint8_t IRQ1_counter, IRQ2_counter;
+static uint8_t i;
+//UART input
+extern char * uart_in_p;
+static volatile uint8_t uart_cnt;
 /* USER CODE END 0 */
 
 /* External variables --------------------------------------------------------*/
+extern TIM_HandleTypeDef htim4;
+extern UART_HandleTypeDef huart1;
 
 /******************************************************************************/
 /*            Cortex-M3 Processor Interruption and Exception Handlers         */ 
@@ -201,21 +219,107 @@ void EXTI2_IRQHandler(void)
   /* USER CODE BEGIN EXTI2_IRQn 0 */
   /* USER CODE END EXTI2_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_2);
-  /* USER CODE BEGIN EXTI2_IRQn 1 */  
+  /* USER CODE BEGIN EXTI2_IRQn 1 */
+    IRQ1_counter++;
   NRF_IRQ_Handler(&nrf1);
   /* USER CODE END EXTI2_IRQn 1 */
 }
 
 /**
-* @brief This function handles EXTI line[15:10] interrupts.
+* @brief This function handles TIM4 global interrupt.
 */
-void EXTI15_10_IRQHandler(void)
+void TIM4_IRQHandler(void)
 {
-  /* USER CODE BEGIN EXTI15_10_IRQn 0 */
-  /* USER CODE END EXTI15_10_IRQn 0 */
-  HAL_GPIO_EXTI_IRQHandler(GPIO_PIN_10);
-  /* USER CODE BEGIN EXTI15_10_IRQn 1 */
-  /* USER CODE END EXTI15_10_IRQn 1 */
+  /* USER CODE BEGIN TIM4_IRQn 0 */
+/*  TO DO
+    uint8_t flags = (uint8_t)(htim4->Instance->SR & 0x1e)
+    */
+    if (htim4.Instance->SR & 0x2)   //bit 1 is OCR1 = BUZZER
+    {
+        if (Buzzer.State == START)    //just started
+        {
+            HAL_TIM_PWM_Start (Buzzer.TIM_Handle, Buzzer.TIM_Channel);
+            Buzzer.State = RUN;
+            Buzzer.counter = Buzzer.timer;
+        }
+        if (--Buzzer.counter)    //decrement counter and check if finished
+            {;              //Not 0 - do nothing. Or here's a place if you wish
+            }
+        else    //decremented to zero. Must. Stop. NOW!
+        {                
+            HAL_TIM_PWM_Stop (Buzzer.TIM_Handle, Buzzer.TIM_Channel);
+            TIM4->DIER &= ~TIM_IT_CC1;  //OCR1 interrupt off 
+            Buzzer.State = STOP; //reset buzzer activity flag
+        }
+    }
+    
+    /*          LED PROCESSING          */
+    if (htim4.Instance->SR & 0x4)   //bit 2 is OCR2 = LED
+    {
+        for (i=0;i<4;i++)
+        {
+            if (LED_p[i]->State == START)
+            {
+                HAL_GPIO_WritePin (LED_p[i]->LED_Port, LED_p[i]->LED_Pin, GPIO_PIN_SET);
+                LED_p[i]->State = RUN;
+                LED_p[i]->counter = LED_p[i]->timer;
+            }
+            if (LED_p[i]->State == RUN)
+            {
+                if (--LED_p[i]->counter)    //decrement counter and check if finished
+                {;              //Not 0 - do nothing. Or here's a place if you wish
+                }
+                else    //decremented to zero. Check for mode
+                {
+                    if (LED_p[i]->Mode == ONCE)
+                    {
+                        HAL_GPIO_WritePin (LED_p[i]->LED_Port, LED_p[i]->LED_Pin, GPIO_PIN_RESET);
+                        LED_p[i]->State = STOP; //reset LED state
+                    }
+                    else if (LED_p[i]->Mode == PERM)
+                    {
+                        HAL_GPIO_TogglePin (LED_p[i]->LED_Port, LED_p[i]->LED_Pin);
+                        LED_p[i]->counter = LED_p[i]->timer;                        
+                    }
+                }
+            }
+//            if (LED_p[i]->State == STOP)
+//                HAL_GPIO_WritePin (LED_p[i]->LED_Port, LED_p[i]->LED_Pin, GPIO_PIN_RESET);
+        }
+    }
+  /* USER CODE END TIM4_IRQn 0 */
+  HAL_TIM_IRQHandler(&htim4);
+  /* USER CODE BEGIN TIM4_IRQn 1 */
+
+  /* USER CODE END TIM4_IRQn 1 */
+}
+
+/**
+* @brief This function handles USART1 global interrupt.
+*/
+void USART1_IRQHandler(void)
+{
+  /* USER CODE BEGIN USART1_IRQn 0 */
+
+  /* USER CODE END USART1_IRQn 0 */
+  HAL_UART_IRQHandler(&huart1);
+  /* USER CODE BEGIN USART1_IRQn 1 */
+    if ((USART1->SR&(1<<5)) && uart_cnt<32) //RX not empty flag
+    {
+        *uart_in_p = USART1->DR;
+        uart_in_p++;
+        uart_cnt++;
+        //USART1->SR &= ~(1<<5); //RESET RX not empty flag (works w/o it)
+    }
+    if (USART1->DR == 0x0A || USART1->DR == 0x0D) //line feed symbol = EoT
+                                                  //carriage return = EoT
+        {
+            uart_in_p -= uart_cnt;
+            uart_cnt=0;
+            //RUN_Packet_parser
+        }
+
+  /* USER CODE END USART1_IRQn 1 */
 }
 
 /* USER CODE BEGIN 1 */

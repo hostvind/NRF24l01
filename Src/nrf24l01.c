@@ -1,4 +1,5 @@
 #include "nrf24l01.h"
+//#include "Alerts.h"   //all methods are in Main.c
 extern uint8_t IRQ_flags;
 
 static void NRF_CS_SETPIN(nrf24l01_dev* dev)
@@ -64,8 +65,8 @@ static NRF_RESULT NRF_SetupGPIO(nrf24l01_dev* dev)
 
 uint32_t NRF_Init(nrf24l01_dev* dev)
 {
-    uint8_t config = 0;
-    uint8_t i=0;
+//    uint8_t config = 0;
+//    uint8_t i=0;
     uint32_t res=0;
     NRF_SetupGPIO(dev);
     NRF_PowerUp(dev, 1); 
@@ -176,6 +177,7 @@ void NRF_IRQ_Handler(nrf24l01_dev* dev)
     if ((status & (1 << 4))) { // MaxRetransmits reached
         status |= 1 << 4;
             IRQ_flags |= 1 << 4;
+        NRF_WriteRegister(dev, NRF_STATUS, &status);
 
         NRF_FlushTX(dev);
         //this looks BAD BAD BAD
@@ -187,9 +189,9 @@ void NRF_IRQ_Handler(nrf24l01_dev* dev)
         dev->STATE = NRF_STATE_RX;
         NRF_CE_SETPIN(dev);
         
-        NRF_WriteRegister(dev, NRF_STATUS, &status);
         dev->BUSY_FLAG = 0;
-/*DEBUG LINE*/  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET);
+///*DEBUG LINE*/  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_3, GPIO_PIN_SET);
+        
     }
 }
 
